@@ -44,8 +44,9 @@ class arena():
         current_board = cboard()
         checkmate = False
         dataset = []
-        value = 0; t = 0.1
-        while checkmate == False and current_board.actions() != []:
+        value = 0
+        t = 0.1
+        while not checkmate and current_board.actions() != []:
             dataset.append(copy.deepcopy(ed.encode_board(current_board)))
             print(""); print(current_board.current_board)
             if current_board.player == 0:
@@ -92,38 +93,40 @@ class arena():
 def fork_process(arena_obj, num_games, cpu): # make arena picklable
     arena_obj.evaluate(num_games, cpu)
 
-def evaluate_nets(args, iteration_1, iteration_2) :
+def evaluate_nets(args, iteration_1, iteration_2):
     logger.info("Loading nets...")
-    current_net="%s_iter%d.pth.tar" % (args.neural_net_name, iteration_2); best_net="%s_iter%d.pth.tar" % (args.neural_net_name, iteration_1)
+    current_net="%s_iter%d.pth.tar" % (args.neural_net_name, iteration_2)
+    best_net="%s_iter%d.pth.tar" % (args.neural_net_name, iteration_1)
     current_net_filename = os.path.join("./model_data/",\
                                     current_net)
     best_net_filename = os.path.join("./model_data/",\
                                     best_net)
-    
+
     logger.info("Current net: %s" % current_net)
     logger.info("Previous (Best) net: %s" % best_net)
-    
+
     current_cnet = ConnectNet()
     best_cnet = ConnectNet()
-    cuda = torch.cuda.is_available()
-    if cuda:
+    if cuda := torch.cuda.is_available():
         current_cnet.cuda()
         best_cnet.cuda()
-    
+
     if not os.path.isdir("./evaluator_data/"):
         os.mkdir("evaluator_data")
-    
+
     if args.MCTS_num_processes > 1:
         mp.set_start_method("spawn",force=True)
-        
-        current_cnet.share_memory(); best_cnet.share_memory()
-        current_cnet.eval(); best_cnet.eval()
-        
+
+        current_cnet.share_memory()
+        best_cnet.share_memory()
+        current_cnet.eval()
+        best_cnet.eval()
+
         checkpoint = torch.load(current_net_filename)
         current_cnet.load_state_dict(checkpoint['state_dict'])
         checkpoint = torch.load(best_net_filename)
         best_cnet.load_state_dict(checkpoint['state_dict'])
-         
+
         processes = []
         if args.MCTS_num_processes > mp.cpu_count():
             num_processes = mp.cpu_count()
@@ -138,28 +141,22 @@ def evaluate_nets(args, iteration_1, iteration_2) :
                 processes.append(p)
             for p in processes:
                 p.join()
-               
+
         wins_ratio = 0.0
         for i in range(num_processes):
             stats = load_pickle("wins_cpu_%i" % (i))
             wins_ratio += stats['best_win_ratio']
-        wins_ratio = wins_ratio/num_processes
-        if wins_ratio >= 0.55:
-            return iteration_2
-        else:
-            return iteration_1
-            
+        wins_ratio /= num_processes
+        return iteration_2 if wins_ratio >= 0.55 else iteration_1
     elif args.MCTS_num_processes == 1:
-        current_cnet.eval(); best_cnet.eval()
+        current_cnet.eval()
+        best_cnet.eval()
         checkpoint = torch.load(current_net_filename)
         current_cnet.load_state_dict(checkpoint['state_dict'])
         checkpoint = torch.load(best_net_filename)
         best_cnet.load_state_dict(checkpoint['state_dict'])
         arena1 = arena(current_cnet=current_cnet, best_cnet=best_cnet)
         arena1.evaluate(num_games=args.num_evaluator_games, cpu=0)
-        
+
         stats = load_pickle("wins_cpu_%i" % (0))
-        if stats.best_win_ratio >= 0.55:
-            return iteration_2
-        else:
-            return iteration_1
+        return iteration_2 if stats.best_win_ratio >= 0.55 else iteration_1

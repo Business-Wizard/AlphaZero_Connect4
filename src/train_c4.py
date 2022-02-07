@@ -63,11 +63,11 @@ def train(net, dataset, optimizer, scheduler, start_epoch, cpu, args, iteration)
     cuda = torch.cuda.is_available()
     net.train()
     criterion = AlphaLoss()
-    
+
     train_set = board_data(dataset)
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=0, pin_memory=False)
     losses_per_epoch = load_results(iteration + 1)
-    
+
     logger.info("Starting training process...")
     update_size = len(train_loader)//10
     print("Update step size: %d" % update_size)
@@ -87,7 +87,7 @@ def train(net, dataset, optimizer, scheduler, start_epoch, cpu, args, iteration)
             if (epoch % args.gradient_acc_steps) == 0:
                 optimizer.step()
                 optimizer.zero_grad()
-                
+
             total_loss += loss.item()
             if i % update_size == (update_size - 1):    # print every update_size-d mini-batches of size = batch_size
                 losses_per_batch.append(args.gradient_acc_steps*total_loss/update_size)
@@ -100,9 +100,9 @@ def train(net, dataset, optimizer, scheduler, start_epoch, cpu, args, iteration)
                 #print("Res18 grad %.7f:" % net.res_18.conv1.weight.grad.mean().item())
                 print(" ")
                 total_loss = 0.0
-        
+
         scheduler.step()
-        if len(losses_per_batch) >= 1:
+        if losses_per_batch:
             losses_per_epoch.append(sum(losses_per_batch)/len(losses_per_batch))
         if (epoch % 2) == 0:
             save_as_pickle("losses_per_epoch_iter%d.pkl" % (iteration + 1), losses_per_epoch)
@@ -122,7 +122,11 @@ def train(net, dataset, optimizer, scheduler, start_epoch, cpu, args, iteration)
     logger.info("Finished Training!")
     fig = plt.figure()
     ax = fig.add_subplot(222)
-    ax.scatter([e for e in range(start_epoch, (len(losses_per_epoch) + start_epoch))], losses_per_epoch)
+    ax.scatter(
+        list(range(start_epoch, (len(losses_per_epoch) + start_epoch))),
+        losses_per_epoch,
+    )
+
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss per batch")
     ax.set_title("Loss vs Epoch")
@@ -134,20 +138,19 @@ def train_connectnet(args, iteration, new_optim_state):
     logger.info("Loading training data...")
     data_path="./datasets/iter_%d/" % iteration
     datasets = []
-    for idx,file in enumerate(os.listdir(data_path)):
+    for file in os.listdir(data_path):
         filename = os.path.join(data_path,file)
         with open(filename, 'rb') as fo:
             datasets.extend(pickle.load(fo, encoding='bytes'))
     datasets = np.array(datasets)
     logger.info("Loaded data from %s." % data_path)
-    
+
     # train net
     net = ConnectNet()
-    cuda = torch.cuda.is_available()
-    if cuda:
+    if cuda := torch.cuda.is_available():
         net.cuda()
     optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.8, 0.999))
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[50,100,150,200,250,300,400], gamma=0.77)
     start_epoch = load_state(net, optimizer, scheduler, args, iteration, new_optim_state)
-    
+
     train(net, datasets, optimizer, scheduler, start_epoch, 0, args, iteration)
